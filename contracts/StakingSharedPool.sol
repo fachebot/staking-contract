@@ -2,12 +2,15 @@
 pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "./StakingContract.sol";
 
-contract StakingWithSharedPool is Ownable, StakingContract {
+contract StakingSharedPool is Ownable, StakingContract {
+    using SafeCast for int256;
+    using SafeCast for uint256;
     using SafeERC20 for IERC20;
 
     uint256 private constant ACC_TOKEN_PRECISION = 1e12;
@@ -22,7 +25,7 @@ contract StakingWithSharedPool is Ownable, StakingContract {
 
     struct UserInfo {
         uint256 amount;
-        uint256 rewardDebt;
+        int256 rewardDebt;
     }
 
     IERC20 public immutable stakeToken;
@@ -49,13 +52,21 @@ contract StakingWithSharedPool is Ownable, StakingContract {
         uint256 endBlock,
         uint256 tokenPerBlock
     ) external onlyOwner {
-        require(endBlock > startBlock, "StakingWithSharedPool: invalid block range");
+        require(
+            endBlock > startBlock,
+            "StakingSharedPool: invalid block range"
+        );
 
         poolInfo.startBlock = startBlock;
         poolInfo.endBlock = endBlock;
         poolInfo.tokenPerBlock = tokenPerBlock;
 
-        rewardToken.safeTransferFrom(msg.sender, address(this), startBlock * endBlock);
+        uint256 blocks = endBlock - startBlock;
+        rewardToken.safeTransferFrom(
+            msg.sender,
+            address(this),
+            tokenPerBlock * blocks
+        );
     }
 
     function updatePool() public {
@@ -92,10 +103,8 @@ contract StakingWithSharedPool is Ownable, StakingContract {
             accTokenPerShare += (tokenReward * ACC_TOKEN_PRECISION) / lpSupply;
         }
 
-        pending =
-            (user.amount * accTokenPerShare) /
-            ACC_TOKEN_PRECISION -
-            user.rewardDebt;
+        pending = (((user.amount * accTokenPerShare) / ACC_TOKEN_PRECISION)
+            .toInt256() - user.rewardDebt).toUint256();
     }
 
     function deposit(uint256 amount, address to) external {
@@ -103,9 +112,8 @@ contract StakingWithSharedPool is Ownable, StakingContract {
         UserInfo storage user = userInfo[to];
 
         user.amount += amount;
-        user.rewardDebt +=
-            (amount * poolInfo.accTokenPerShare) /
-            ACC_TOKEN_PRECISION;
+        user.rewardDebt += ((amount * poolInfo.accTokenPerShare) /
+            ACC_TOKEN_PRECISION).toInt256();
 
         stakeToken.safeTransferFrom(msg.sender, address(this), amount);
 
@@ -116,9 +124,8 @@ contract StakingWithSharedPool is Ownable, StakingContract {
         updatePool();
         UserInfo storage user = userInfo[msg.sender];
 
-        user.rewardDebt -=
-            (amount * poolInfo.accTokenPerShare) /
-            ACC_TOKEN_PRECISION;
+        user.rewardDebt -= ((amount * poolInfo.accTokenPerShare) /
+            ACC_TOKEN_PRECISION).toInt256();
         user.amount -= amount;
 
         stakeToken.safeTransfer(to, amount);
@@ -129,9 +136,9 @@ contract StakingWithSharedPool is Ownable, StakingContract {
     function harvest(address to) external {
         updatePool();
         UserInfo storage user = userInfo[msg.sender];
-        uint256 accumulatedToken = (user.amount * poolInfo.accTokenPerShare) /
-            ACC_TOKEN_PRECISION;
-        uint256 pendingToken = accumulatedToken - user.rewardDebt;
+        int256 accumulatedToken = ((user.amount * poolInfo.accTokenPerShare) /
+            ACC_TOKEN_PRECISION).toInt256();
+        uint256 pendingToken = (accumulatedToken - user.rewardDebt).toUint256();
 
         user.rewardDebt = accumulatedToken;
 
@@ -145,14 +152,14 @@ contract StakingWithSharedPool is Ownable, StakingContract {
     function withdrawAndHarvest(uint256 amount, address to) external {
         updatePool();
         UserInfo storage user = userInfo[msg.sender];
-        uint256 accumulatedToken = (user.amount * poolInfo.accTokenPerShare) /
-            ACC_TOKEN_PRECISION;
-        uint256 pendingToken = accumulatedToken - user.rewardDebt;
+        int256 accumulatedToken = ((user.amount * poolInfo.accTokenPerShare) /
+            ACC_TOKEN_PRECISION).toInt256();
+        uint256 pendingToken = (accumulatedToken - user.rewardDebt).toUint256();
 
         user.rewardDebt =
             accumulatedToken -
-            (amount * poolInfo.accTokenPerShare) /
-            ACC_TOKEN_PRECISION;
+            ((amount * poolInfo.accTokenPerShare) / ACC_TOKEN_PRECISION)
+                .toInt256();
         user.amount -= amount;
 
         rewardToken.safeTransfer(to, pendingToken);
