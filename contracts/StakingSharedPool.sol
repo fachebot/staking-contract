@@ -182,4 +182,15 @@ contract StakingSharedPool is Ownable, StakingContract {
         emit Unstake(msg.sender, amount, to);
         emit Claim(msg.sender, pendingToken);
     }
+
+    function kill(address payable to) external onlyOwner {
+        require(
+            block.number > poolInfo.endBlock &&
+                lastRewardBlock >= poolInfo.endBlock,
+            "StakingSharedPool: previous period did not end"
+        );
+
+        rewardToken.safeTransfer(to, rewardToken.balanceOf(address(this)));
+        selfdestruct(to);
+    }
 }
