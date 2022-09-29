@@ -1,13 +1,32 @@
 # Staking Contract
 
-This project demonstrates a basic Hardhat use case. It comes with a sample contract, a test for that contract, and a script that deploys that contract.
-
-Try running some of the following tasks:
+## Usage
+-----
+### Install requirements with npm:
 
 ```shell
-npx hardhat help
+npm install
+```
+
+### Run all tests:
+
+```shell
 npx hardhat test
+```
+
+Report Gas:
+
+```shell
 REPORT_GAS=true npx hardhat test
-npx hardhat node
-npx hardhat run scripts/deploy.ts
+```
+
+### Deploy
+Preparation:
+- Set `NODE_URL` in `.env`
+- Set `STAKE_TOKEN` in `.env`
+- Set `REWARD_TOKEN` in `.env`
+- Set `PRIVATE_KEY` in `.env`
+
+```shell
+npx hardhat run scripts/deploy.ts --network <network>
 ```

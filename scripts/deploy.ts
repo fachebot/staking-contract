@@ -1,18 +1,21 @@
 import { ethers } from "hardhat";
+import dotenv from "dotenv";
+
+// Load environment variables.
+dotenv.config();
+const { STAKE_TOKEN, REWARD_TOKEN } = process.env;
 
 async function main() {
-  const currentTimestampInSeconds = Math.round(Date.now() / 1000);
-  const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-  const unlockTime = currentTimestampInSeconds + ONE_YEAR_IN_SECS;
+  if (!STAKE_TOKEN || !REWARD_TOKEN) {
+    throw new Error("Could not find STAKE_TOKEN and REWARD_TOKEN in env");
+  }
 
-  const lockedAmount = ethers.utils.parseEther("1");
+  const StakingSharedPool = await ethers.getContractFactory("StakingSharedPool");
+  const stakingSharedPool = await StakingSharedPool.deploy(STAKE_TOKEN, REWARD_TOKEN);
 
-  const Lock = await ethers.getContractFactory("Lock");
-  const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
+  await stakingSharedPool.deployed();
 
-  await lock.deployed();
-
-  console.log(`Lock with 1 ETH and unlock timestamp ${unlockTime} deployed to ${lock.address}`);
+  console.log(`StakingSharedPool deployed to ${stakingSharedPool.address}`);
 }
 
 // We recommend this pattern to be able to use async/await everywhere
