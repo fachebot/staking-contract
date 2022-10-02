@@ -6,74 +6,76 @@ import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import "./StakingContract.sol";
-
-contract StakingSharedPool is Ownable, StakingContract {
+contract StakingSharedPool is Ownable {
     using SafeCast for int256;
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
-
-    uint256 private constant ACC_TOKEN_PRECISION = 1e12;
-
-    struct PoolInfo {
-        uint64 startBlock;
-        uint64 endBlock;
-        uint128 tokenPerBlock;
-    }
 
     struct UserInfo {
         uint256 amount;
         int256 rewardDebt;
     }
 
-    IERC20 public immutable stakeToken;
-    IERC20 public immutable rewardToken;
-    PoolInfo public poolInfo;
-    uint256 accTokenPerShare;
-    uint256 lastRewardBlock;
-    mapping(address => UserInfo) public userInfo;
+    struct PoolInfo {
+        IERC20 stakeToken;
+        IERC20 rewardToken;
+        uint64 startBlock;
+        uint64 endBlock;
+        uint128 tokenPerBlock;
+        uint256 accTokenPerShare;
+        uint256 lastRewardBlock;
+        mapping(address => UserInfo) userInfo;
+    }
 
+    uint256 public next;
+    mapping(uint256 => PoolInfo) public poolInfo;
+
+    uint256 private constant ACC_TOKEN_PRECISION = 1e12;
+
+    event NewPool(uint256 pid, IERC20 stakeToken, IERC20 rewardToken);
+    event NewPeriod(
+        uint256 pid,
+        uint64 startBlock,
+        uint64 endBlock,
+        uint128 tokenPerBlock
+    );
     event UpdatePool(
+        uint256 pid,
         uint256 lastRewardBlock,
         uint256 lpSupply,
         uint256 accTokenPerShare
     );
-    event NewPeriod(uint64 startBlock, uint64 endBlock, uint128 tokenPerBlock);
-    event Stake(address indexed user, uint256 amount, address indexed to);
-    event Unstake(address indexed user, uint256 amount, address indexed to);
-    event Claim(address indexed user, uint256 amount);
+    event Stake(
+        uint256 pid,
+        address indexed user,
+        uint256 amount,
+        address indexed to
+    );
+    event Unstake(
+        uint256 pid,
+        address indexed user,
+        uint256 amount,
+        address indexed to
+    );
+    event Claim(uint256 pid, address indexed user, uint256 amount);
 
-    constructor(IERC20 _stakeToken, IERC20 _rewardToken) {
-        stakeToken = _stakeToken;
-        rewardToken = _rewardToken;
-    }
+    function newPool(IERC20 stakeToken, IERC20 rewardToken)
+        external
+        returns (uint256)
+    {
+        uint256 pid = next;
+        next++;
 
-    function blocksReward() internal view returns (uint256) {
-        uint256 end = block.number < poolInfo.endBlock
-            ? block.number
-            : poolInfo.endBlock;
-        uint256 start = lastRewardBlock >= poolInfo.startBlock
-            ? lastRewardBlock
-            : poolInfo.startBlock;
+        poolInfo[pid].stakeToken = stakeToken;
+        poolInfo[pid].rewardToken = rewardToken;
 
-        return end <= start ? 0 : (end - start) * poolInfo.tokenPerBlock;
-    }
+        emit NewPool(pid, stakeToken, rewardToken);
 
-    function pendingReward(address _user) external view returns (uint256) {
-        uint256 value = accTokenPerShare;
-        UserInfo storage user = userInfo[_user];
-        uint256 lpSupply = stakeToken.balanceOf(address(this));
-        if (block.number > lastRewardBlock && lpSupply != 0) {
-            uint256 tokenReward = blocksReward();
-            value += (tokenReward * ACC_TOKEN_PRECISION) / lpSupply;
-        }
-
-        return
-            (((user.amount * value) / ACC_TOKEN_PRECISION).toInt256() -
-                user.rewardDebt).toUint256();
+        return pid;
     }
 
     function newPeriod(
+        uint256 pid,
         uint64 startBlock,
         uint64 endBlock,
         uint128 tokenPerBlock
@@ -83,114 +85,174 @@ contract StakingSharedPool is Ownable, StakingContract {
             "StakingSharedPool: invalid block range"
         );
         require(
-            startBlock > poolInfo.endBlock,
+            startBlock > poolInfo[pid].endBlock,
             "StakingSharedPool: invalid block range"
         );
         require(
-            block.number > poolInfo.endBlock,
+            block.number > poolInfo[pid].endBlock,
             "StakingSharedPool: previous period did not end"
         );
 
-        updatePool();
+        updatePool(pid);
 
-        poolInfo.startBlock = startBlock;
-        poolInfo.endBlock = endBlock;
-        poolInfo.tokenPerBlock = tokenPerBlock;
-        lastRewardBlock = startBlock;
+        poolInfo[pid].startBlock = startBlock;
+        poolInfo[pid].endBlock = endBlock;
+        poolInfo[pid].tokenPerBlock = tokenPerBlock;
+        poolInfo[pid].lastRewardBlock = startBlock;
 
-        rewardToken.safeTransferFrom(
+        poolInfo[pid].rewardToken.safeTransferFrom(
             msg.sender,
             address(this),
             tokenPerBlock * (endBlock - startBlock)
         );
 
-        emit NewPeriod(startBlock, endBlock, tokenPerBlock);
+        emit NewPeriod(pid, startBlock, endBlock, tokenPerBlock);
     }
 
-    function updatePool() public {
-        if (block.number > lastRewardBlock) {
-            uint256 lpSupply = stakeToken.balanceOf(address(this));
+    function pendingReward(uint256 pid, address _user)
+        external
+        view
+        returns (uint256)
+    {
+        PoolInfo storage pool = poolInfo[pid];
+        require(
+            address(pool.stakeToken) != address(0),
+            "StakingSharedPool: pool not found"
+        );
+
+        uint256 value = pool.accTokenPerShare;
+        UserInfo storage user = pool.userInfo[_user];
+        uint256 lpSupply = pool.stakeToken.balanceOf(address(this));
+        if (block.number > pool.lastRewardBlock && lpSupply != 0) {
+            uint256 tokenReward = blocksReward(pid);
+            value += (tokenReward * ACC_TOKEN_PRECISION) / lpSupply;
+        }
+
+        return
+            (((user.amount * value) / ACC_TOKEN_PRECISION).toInt256() -
+                user.rewardDebt).toUint256();
+    }
+
+    function blocksReward(uint256 pid) internal view returns (uint256) {
+        PoolInfo storage pool = poolInfo[pid];
+        require(
+            address(pool.stakeToken) != address(0),
+            "StakingSharedPool: pool not found"
+        );
+
+        uint256 end = block.number < pool.endBlock
+            ? block.number
+            : pool.endBlock;
+        uint256 start = pool.lastRewardBlock >= pool.startBlock
+            ? pool.lastRewardBlock
+            : pool.startBlock;
+
+        return end <= start ? 0 : (end - start) * pool.tokenPerBlock;
+    }
+
+    function updatePool(uint256 pid) public {
+        PoolInfo storage pool = poolInfo[pid];
+        require(
+            address(pool.stakeToken) != address(0),
+            "StakingSharedPool: pool not found"
+        );
+
+        if (block.number > pool.lastRewardBlock) {
+            uint256 lpSupply = pool.stakeToken.balanceOf(address(this));
             if (lpSupply > 0) {
-                uint256 tokenReward = blocksReward();
-                accTokenPerShare +=
+                uint256 tokenReward = blocksReward(pid);
+                pool.accTokenPerShare +=
                     (tokenReward * ACC_TOKEN_PRECISION) /
                     lpSupply;
             }
 
-            lastRewardBlock = block.number;
-            emit UpdatePool(lastRewardBlock, lpSupply, accTokenPerShare);
+            pool.lastRewardBlock = block.number;
+            emit UpdatePool(
+                pid,
+                pool.lastRewardBlock,
+                lpSupply,
+                pool.accTokenPerShare
+            );
         }
     }
 
-    function stake(uint256 amount, address to) external {
-        updatePool();
-        UserInfo storage user = userInfo[to];
+    function stake(
+        uint256 pid,
+        uint256 amount,
+        address to
+    ) external {
+        updatePool(pid);
+        UserInfo storage user = poolInfo[pid].userInfo[to];
 
         user.amount += amount;
-        user.rewardDebt += ((amount * accTokenPerShare) / ACC_TOKEN_PRECISION)
-            .toInt256();
+        user.rewardDebt += ((amount * poolInfo[pid].accTokenPerShare) /
+            ACC_TOKEN_PRECISION).toInt256();
 
-        stakeToken.safeTransferFrom(msg.sender, address(this), amount);
+        poolInfo[pid].stakeToken.safeTransferFrom(
+            msg.sender,
+            address(this),
+            amount
+        );
 
-        emit Stake(msg.sender, amount, to);
+        emit Stake(pid, msg.sender, amount, to);
     }
 
-    function unstake(uint256 amount, address to) external {
-        updatePool();
-        UserInfo storage user = userInfo[msg.sender];
+    function unstake(
+        uint256 pid,
+        uint256 amount,
+        address to
+    ) external {
+        updatePool(pid);
 
-        user.rewardDebt -= ((amount * accTokenPerShare) / ACC_TOKEN_PRECISION)
-            .toInt256();
+        UserInfo storage user = poolInfo[pid].userInfo[msg.sender];
+        user.rewardDebt -= ((amount * poolInfo[pid].accTokenPerShare) /
+            ACC_TOKEN_PRECISION).toInt256();
         user.amount -= amount;
 
-        stakeToken.safeTransfer(to, amount);
+        poolInfo[pid].stakeToken.safeTransfer(to, amount);
 
-        emit Unstake(msg.sender, amount, to);
+        emit Unstake(pid, msg.sender, amount, to);
     }
 
-    function claim(address to) external {
-        updatePool();
-        UserInfo storage user = userInfo[msg.sender];
-        int256 accumulatedToken = ((user.amount * accTokenPerShare) /
-            ACC_TOKEN_PRECISION).toInt256();
+    function claim(uint256 pid, address to) external {
+        updatePool(pid);
+
+        UserInfo storage user = poolInfo[pid].userInfo[msg.sender];
+        int256 accumulatedToken = ((user.amount *
+            poolInfo[pid].accTokenPerShare) / ACC_TOKEN_PRECISION).toInt256();
         uint256 pendingToken = (accumulatedToken - user.rewardDebt).toUint256();
 
         user.rewardDebt = accumulatedToken;
 
         if (pendingToken > 0) {
-            rewardToken.safeTransfer(to, pendingToken);
+            poolInfo[pid].rewardToken.safeTransfer(to, pendingToken);
         }
 
-        emit Claim(msg.sender, pendingToken);
+        emit Claim(pid, msg.sender, pendingToken);
     }
 
-    function unstakeAndClaim(uint256 amount, address to) external {
-        updatePool();
-        UserInfo storage user = userInfo[msg.sender];
-        int256 accumulatedToken = ((user.amount * accTokenPerShare) /
-            ACC_TOKEN_PRECISION).toInt256();
+    function unstakeAndClaim(
+        uint256 pid,
+        uint256 amount,
+        address to
+    ) external {
+        updatePool(pid);
+
+        UserInfo storage user = poolInfo[pid].userInfo[msg.sender];
+        int256 accumulatedToken = ((user.amount *
+            poolInfo[pid].accTokenPerShare) / ACC_TOKEN_PRECISION).toInt256();
         uint256 pendingToken = (accumulatedToken - user.rewardDebt).toUint256();
 
         user.rewardDebt =
             accumulatedToken -
-            ((amount * accTokenPerShare) / ACC_TOKEN_PRECISION).toInt256();
+            ((amount * poolInfo[pid].accTokenPerShare) / ACC_TOKEN_PRECISION)
+                .toInt256();
         user.amount -= amount;
 
-        rewardToken.safeTransfer(to, pendingToken);
-        stakeToken.safeTransfer(to, amount);
+        poolInfo[pid].rewardToken.safeTransfer(to, pendingToken);
+        poolInfo[pid].stakeToken.safeTransfer(to, amount);
 
-        emit Unstake(msg.sender, amount, to);
-        emit Claim(msg.sender, pendingToken);
-    }
-
-    function kill(address payable to) external onlyOwner {
-        require(
-            block.number > poolInfo.endBlock &&
-                lastRewardBlock >= poolInfo.endBlock,
-            "StakingSharedPool: previous period did not end"
-        );
-
-        rewardToken.safeTransfer(to, rewardToken.balanceOf(address(this)));
-        selfdestruct(to);
+        emit Unstake(pid, msg.sender, amount, to);
+        emit Claim(pid, msg.sender, pendingToken);
     }
 }
