@@ -16,23 +16,24 @@ contract StakingSharedPool is Ownable {
         int256 rewardDebt;
     }
 
-    struct PoolInfo {
-        uint64 startBlock;
-        uint64 endBlock;
-        uint128 tokenPerBlock;
-        uint256 accTokenPerShare;
-        uint256 lastRewardBlock;
-        mapping(address => UserInfo) userInfo;
-    }
+    uint64 startBlock;
+    uint64 endBlock;
+    uint128 tokenPerBlock;
+    uint256 accTokenPerShare;
+    uint256 lastRewardBlock;
+    mapping(address => UserInfo) userInfo;
 
     IERC20 public immutable stakeToken;
     IERC20 public immutable rewardToken;
+
     uint256 private constant ACC_TOKEN_PRECISION = 1e12;
 
-    PoolInfo public poolInfo;
-
     event AddPeriod(uint64 startBlock, uint64 endBlock, uint128 tokenPerBlock);
-    event UpdatePool(uint256 lastRewardBlock, uint256 lpSupply, uint256 accTokenPerShare);
+    event UpdatePool(
+        uint256 lastRewardBlock,
+        uint256 supply,
+        uint256 accTokenPerShare
+    );
     event Stake(address indexed user, uint256 amount, address indexed to);
     event Unstake(address indexed user, uint256 amount, address indexed to);
     event Claim(address indexed user, uint256 amount);
@@ -42,30 +43,34 @@ contract StakingSharedPool is Ownable {
         rewardToken = _rewardToken;
     }
 
+    /// @notice Add a new reward period.
+    /// @param _startBlock Block number of start distributing rewards.
+    /// @param _endBlock Block number of stop distributing rewards.
+    /// @param _tokenPerBlock Amount of reward tokens per block.
     function addPeriod(
-        uint64 startBlock,
-        uint64 endBlock,
-        uint128 tokenPerBlock
+        uint64 _startBlock,
+        uint64 _endBlock,
+        uint128 _tokenPerBlock
     ) external onlyOwner {
         require(
-            endBlock > startBlock,
+            _endBlock > _startBlock,
             "StakingSharedPool: invalid block range"
         );
         require(
-            startBlock > poolInfo.endBlock,
+            _startBlock > endBlock,
             "StakingSharedPool: invalid block range"
         );
         require(
-            block.number > poolInfo.endBlock,
+            block.number > endBlock,
             "StakingSharedPool: previous period did not end"
         );
 
         updatePool();
 
-        poolInfo.startBlock = startBlock;
-        poolInfo.endBlock = endBlock;
-        poolInfo.tokenPerBlock = tokenPerBlock;
-        poolInfo.lastRewardBlock = startBlock;
+        startBlock = _startBlock;
+        endBlock = _endBlock;
+        tokenPerBlock = _tokenPerBlock;
+        lastRewardBlock = _startBlock;
 
         rewardToken.safeTransferFrom(
             msg.sender,
@@ -76,17 +81,16 @@ contract StakingSharedPool is Ownable {
         emit AddPeriod(startBlock, endBlock, tokenPerBlock);
     }
 
-    function pendingReward(address _user)
-        external
-        view
-        returns (uint256)
-    {
-        uint256 value = poolInfo.accTokenPerShare;
-        UserInfo storage user = poolInfo.userInfo[_user];
+    /// @notice View function to see pending reward token on frontend.
+    /// @param _user Address of user.
+    /// @return pending Token reward for a given user.
+    function pendingReward(address _user) external view returns (uint256) {
+        uint256 value = accTokenPerShare;
+        UserInfo storage user = userInfo[_user];
         uint256 lpSupply = stakeToken.balanceOf(address(this));
-        if (block.number > poolInfo.lastRewardBlock && lpSupply != 0) {
-            uint256 tokenReward = blocksReward();
-            value += (tokenReward * ACC_TOKEN_PRECISION) / lpSupply;
+        if (block.number > lastRewardBlock && lpSupply != 0) {
+            uint256 reward = blocksReward();
+            value += (reward * ACC_TOKEN_PRECISION) / lpSupply;
         }
 
         return
@@ -94,61 +98,55 @@ contract StakingSharedPool is Ownable {
                 user.rewardDebt).toUint256();
     }
 
+    /// @notice Calculates and returns the `amount` of reward token.
     function blocksReward() internal view returns (uint256) {
-        uint256 end = block.number < poolInfo.endBlock
-            ? block.number
-            : poolInfo.endBlock;
-        uint256 start = poolInfo.lastRewardBlock >= poolInfo.startBlock
-            ? poolInfo.lastRewardBlock
-            : poolInfo.startBlock;
+        uint256 end = block.number < endBlock ? block.number : endBlock;
+        uint256 start = lastRewardBlock >= startBlock
+            ? lastRewardBlock
+            : startBlock;
 
-        return end <= start ? 0 : (end - start) * poolInfo.tokenPerBlock;
+        return end <= start ? 0 : (end - start) * tokenPerBlock;
     }
 
+    /// @notice Update reward variables of the given pool.
     function updatePool() public {
-        if (block.number > poolInfo.lastRewardBlock) {
+        if (block.number > lastRewardBlock) {
             uint256 lpSupply = stakeToken.balanceOf(address(this));
             if (lpSupply > 0) {
-                uint256 tokenReward = blocksReward();
-                poolInfo.accTokenPerShare +=
-                    (tokenReward * ACC_TOKEN_PRECISION) /
-                    lpSupply;
+                uint256 reward = blocksReward();
+                accTokenPerShare += (reward * ACC_TOKEN_PRECISION) / lpSupply;
             }
 
-            poolInfo.lastRewardBlock = block.number;
-            emit UpdatePool(
-                poolInfo.lastRewardBlock,
-                lpSupply,
-                poolInfo.accTokenPerShare
-            );
+            lastRewardBlock = block.number;
+            emit UpdatePool(lastRewardBlock, lpSupply, accTokenPerShare);
         }
     }
 
-    function stake(
-        uint256 amount,
-        address to
-    ) external {
+    /// @notice Deposit stake tokens to contract for reward allocation.
+    /// @param amount LP token amount to deposit.
+    /// @param to The receiver of `amount` deposit benefit.
+    function stake(uint256 amount, address to) external {
         updatePool();
 
-        UserInfo storage user = poolInfo.userInfo[to];
+        UserInfo storage user = userInfo[to];
         user.amount += amount;
-        user.rewardDebt += ((amount * poolInfo.accTokenPerShare) /
-            ACC_TOKEN_PRECISION).toInt256();
+        user.rewardDebt += ((amount * accTokenPerShare) / ACC_TOKEN_PRECISION)
+            .toInt256();
 
         stakeToken.safeTransferFrom(msg.sender, address(this), amount);
 
         emit Stake(msg.sender, amount, to);
     }
 
-    function unstake(
-        uint256 amount,
-        address to
-    ) external {
+    /// @notice Withdraw stake token from contract.
+    /// @param amount LP token amount to withdraw.
+    /// @param to Receiver of the LP tokens.
+    function unstake(uint256 amount, address to) external {
         updatePool();
 
-        UserInfo storage user = poolInfo.userInfo[msg.sender];
-        user.rewardDebt -= ((amount * poolInfo.accTokenPerShare) /
-            ACC_TOKEN_PRECISION).toInt256();
+        UserInfo storage user = userInfo[msg.sender];
+        user.rewardDebt -= ((amount * accTokenPerShare) / ACC_TOKEN_PRECISION)
+            .toInt256();
         user.amount -= amount;
 
         stakeToken.safeTransfer(to, amount);
@@ -156,11 +154,13 @@ contract StakingSharedPool is Ownable {
         emit Unstake(msg.sender, amount, to);
     }
 
+    /// @notice Claim proceeds for transaction sender to `to`.
+    /// @param to Receiver of SUSHI rewards.
     function claim(address to) external {
         updatePool();
 
-        UserInfo storage user = poolInfo.userInfo[msg.sender];
-        int256 accumulatedToken = ((user.amount * poolInfo.accTokenPerShare) /
+        UserInfo storage user = userInfo[msg.sender];
+        int256 accumulatedToken = ((user.amount * accTokenPerShare) /
             ACC_TOKEN_PRECISION).toInt256();
         uint256 pendingToken = (accumulatedToken - user.rewardDebt).toUint256();
 
@@ -173,21 +173,20 @@ contract StakingSharedPool is Ownable {
         emit Claim(msg.sender, pendingToken);
     }
 
-    function unstakeAndClaim(
-        uint256 amount,
-        address to
-    ) external {
+    /// @notice Withdraw stake token from contract and claim proceeds for transaction sender to `to`.
+    /// @param amount LP token amount to withdraw.
+    /// @param to Receiver of the LP tokens and SUSHI rewards.
+    function unstakeAndClaim(uint256 amount, address to) external {
         updatePool();
 
-        UserInfo storage user = poolInfo.userInfo[msg.sender];
-        int256 accumulatedToken = ((user.amount * poolInfo.accTokenPerShare) /
+        UserInfo storage user = userInfo[msg.sender];
+        int256 accumulatedToken = ((user.amount * accTokenPerShare) /
             ACC_TOKEN_PRECISION).toInt256();
         uint256 pendingToken = (accumulatedToken - user.rewardDebt).toUint256();
 
         user.rewardDebt =
             accumulatedToken -
-            ((amount * poolInfo.accTokenPerShare) / ACC_TOKEN_PRECISION)
-                .toInt256();
+            ((amount * accTokenPerShare) / ACC_TOKEN_PRECISION).toInt256();
         user.amount -= amount;
 
         rewardToken.safeTransfer(to, pendingToken);
