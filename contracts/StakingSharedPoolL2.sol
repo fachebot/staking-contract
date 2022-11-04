@@ -2,11 +2,12 @@
 pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-contract StakingSharedPoolL2 is Ownable {
+contract StakingSharedPoolL2 is Ownable, Pausable {
     using SafeCast for int256;
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
@@ -38,9 +39,17 @@ contract StakingSharedPoolL2 is Ownable {
     event Unstake(address indexed user, uint256 amount, address indexed to);
     event Claim(address indexed user, uint256 amount);
 
-    event AddPool(uint256 indexed pid, uint256 allocPoint, IERC20 indexed stakeToken);
+    event AddPool(
+        uint256 indexed pid,
+        uint256 allocPoint,
+        IERC20 indexed stakeToken
+    );
     event SetPool(uint256 indexed pid, uint256 allocPoint);
-    event UpdatePool(uint256 lastRewardBlock, uint256 supply, uint256 accTokenPerShare);
+    event UpdatePool(
+        uint256 lastRewardBlock,
+        uint256 supply,
+        uint256 accTokenPerShare
+    );
     event AddPeriod(uint64 startBlock, uint64 endBlock, uint128 tokenPerBlock);
 
     constructor(IERC20 _rewardToken) {
@@ -144,8 +153,8 @@ contract StakingSharedPoolL2 is Ownable {
         }
 
         return
-            (((user.amount * accTokenPerShare) / ACC_TOKEN_PRECISION).toInt256() -
-                user.rewardDebt).toUint256();
+            (((user.amount * accTokenPerShare) / ACC_TOKEN_PRECISION)
+                .toInt256() - user.rewardDebt).toUint256();
     }
 
     /// @notice Calculates and returns the `amount` of reward token.
@@ -187,7 +196,7 @@ contract StakingSharedPoolL2 is Ownable {
         uint256 pid,
         uint256 amount,
         address to
-    ) external {
+    ) external whenNotPaused {
         PoolInfo memory pool = updatePool(pid);
 
         UserInfo storage user = userInfo[pid][to];
@@ -208,7 +217,7 @@ contract StakingSharedPoolL2 is Ownable {
         uint256 pid,
         uint256 amount,
         address to
-    ) external {
+    ) external whenNotPaused {
         PoolInfo memory pool = updatePool(pid);
 
         UserInfo storage user = userInfo[pid][msg.sender];
@@ -224,7 +233,7 @@ contract StakingSharedPoolL2 is Ownable {
     /// @notice Claim proceeds for transaction sender to `to`.
     /// @param pid The index of the pool. See `poolInfo`.
     /// @param to Receiver of SUSHI rewards.
-    function claim(uint256 pid, address to) external {
+    function claim(uint256 pid, address to) external whenNotPaused {
         PoolInfo memory pool = updatePool(pid);
 
         UserInfo storage user = userInfo[pid][msg.sender];
@@ -249,7 +258,7 @@ contract StakingSharedPoolL2 is Ownable {
         uint256 pid,
         uint256 amount,
         address to
-    ) external {
+    ) external whenNotPaused {
         PoolInfo memory pool = updatePool(pid);
 
         UserInfo storage user = userInfo[pid][msg.sender];
