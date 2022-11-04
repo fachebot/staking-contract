@@ -84,10 +84,10 @@ contract StakingSharedPool is Ownable {
     function pendingReward(address _user) external view returns (uint256) {
         uint256 value = accTokenPerShare;
         UserInfo storage user = userInfo[_user];
-        uint256 lpSupply = stakeToken.balanceOf(address(this));
-        if (block.number > lastRewardBlock && lpSupply != 0) {
+        uint256 supply = stakeToken.balanceOf(address(this));
+        if (block.number > lastRewardBlock && supply != 0) {
             uint256 reward = blocksReward();
-            value += (reward * ACC_TOKEN_PRECISION) / lpSupply;
+            value += (reward * ACC_TOKEN_PRECISION) / supply;
         }
 
         return
@@ -108,14 +108,14 @@ contract StakingSharedPool is Ownable {
     /// @notice Update reward variables of the given pool.
     function updatePool() public {
         if (block.number > lastRewardBlock) {
-            uint256 lpSupply = stakeToken.balanceOf(address(this));
-            if (lpSupply > 0) {
+            uint256 supply = stakeToken.balanceOf(address(this));
+            if (supply > 0) {
                 uint256 reward = blocksReward();
-                accTokenPerShare += (reward * ACC_TOKEN_PRECISION) / lpSupply;
+                accTokenPerShare += (reward * ACC_TOKEN_PRECISION) / supply;
             }
 
             lastRewardBlock = block.number;
-            emit UpdatePool(lastRewardBlock, lpSupply, accTokenPerShare);
+            emit UpdatePool(lastRewardBlock, supply, accTokenPerShare);
         }
     }
 

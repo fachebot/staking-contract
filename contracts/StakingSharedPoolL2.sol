@@ -110,6 +110,7 @@ contract StakingSharedPoolL2 is Ownable {
         uint256 len = poolLength();
         for (uint256 pid = 0; pid < len; pid++) {
             updatePool(pid);
+            poolInfo[pid].lastRewardBlock = _startBlock;
         }
 
         startBlock = _startBlock;
@@ -134,16 +135,16 @@ contract StakingSharedPoolL2 is Ownable {
         view
         returns (uint256)
     {
-        uint256 value = poolInfo[_pid].accTokenPerShare;
+        uint256 accTokenPerShare = poolInfo[_pid].accTokenPerShare;
         UserInfo storage user = userInfo[_pid][_user];
-        uint256 lpSupply = stakeToken[_pid].balanceOf(address(this));
-        if (block.number > poolInfo[_pid].lastRewardBlock && lpSupply != 0) {
+        uint256 supply = stakeToken[_pid].balanceOf(address(this));
+        if (block.number > poolInfo[_pid].lastRewardBlock && supply != 0) {
             uint256 reward = blocksReward(_pid);
-            value += (reward * ACC_TOKEN_PRECISION) / lpSupply;
+            accTokenPerShare += (reward * ACC_TOKEN_PRECISION) / supply;
         }
 
         return
-            (((user.amount * value) / ACC_TOKEN_PRECISION).toInt256() -
+            (((user.amount * accTokenPerShare) / ACC_TOKEN_PRECISION).toInt256() -
                 user.rewardDebt).toUint256();
     }
 
@@ -165,15 +166,16 @@ contract StakingSharedPoolL2 is Ownable {
     function updatePool(uint256 pid) public returns (PoolInfo memory pool) {
         pool = poolInfo[pid];
         if (block.number > pool.lastRewardBlock) {
-            uint256 lpSupply = stakeToken[pid].balanceOf(address(this));
-            if (lpSupply > 0) {
+            uint256 supply = stakeToken[pid].balanceOf(address(this));
+            if (supply > 0) {
                 uint256 reward = blocksReward(pid);
                 pool.accTokenPerShare += ((reward * ACC_TOKEN_PRECISION) /
-                    lpSupply).toUint128();
+                    supply).toUint128();
             }
 
             pool.lastRewardBlock = block.number.toUint64();
-            emit UpdatePool(block.number, lpSupply, pool.accTokenPerShare);
+            poolInfo[pid] = pool;
+            emit UpdatePool(block.number, supply, pool.accTokenPerShare);
         }
     }
 
