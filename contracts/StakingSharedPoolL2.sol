@@ -38,18 +38,10 @@ contract StakingSharedPoolL2 is Ownable {
     event Unstake(address indexed user, uint256 amount, address indexed to);
     event Claim(address indexed user, uint256 amount);
 
-    event LogPoolAddition(
-        uint256 indexed pid,
-        uint256 allocPoint,
-        IERC20 indexed stakeToken
-    );
-    event LogSetPool(uint256 indexed pid, uint256 allocPoint);
+    event AddPool(uint256 indexed pid, uint256 allocPoint, IERC20 indexed stakeToken);
+    event SetPool(uint256 indexed pid, uint256 allocPoint);
+    event UpdatePool(uint256 lastRewardBlock, uint256 supply, uint256 accTokenPerShare);
     event AddPeriod(uint64 startBlock, uint64 endBlock, uint128 tokenPerBlock);
-    event UpdatePool(
-        uint256 lastRewardBlock,
-        uint256 supply,
-        uint256 accTokenPerShare
-    );
 
     constructor(IERC20 _rewardToken) {
         rewardToken = _rewardToken;
@@ -77,7 +69,7 @@ contract StakingSharedPoolL2 is Ownable {
             })
         );
 
-        emit LogPoolAddition(stakeToken.length - 1, _allocPoint, _stakeToken);
+        emit AddPool(stakeToken.length - 1, _allocPoint, _stakeToken);
     }
 
     /// @notice Update the given pool's reward token allocation point. Can only be called by the owner.
@@ -90,7 +82,7 @@ contract StakingSharedPoolL2 is Ownable {
             _allocPoint;
         poolInfo[_pid].allocPoint = _allocPoint.toUint64();
 
-        emit LogSetPool(_pid, _allocPoint);
+        emit SetPool(_pid, _allocPoint);
     }
 
     /// @notice Add a new reward period.

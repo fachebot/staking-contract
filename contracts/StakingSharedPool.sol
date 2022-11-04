@@ -28,15 +28,12 @@ contract StakingSharedPool is Ownable {
 
     uint256 private constant ACC_TOKEN_PRECISION = 1e12;
 
-    event AddPeriod(uint64 startBlock, uint64 endBlock, uint128 tokenPerBlock);
-    event UpdatePool(
-        uint256 lastRewardBlock,
-        uint256 supply,
-        uint256 accTokenPerShare
-    );
     event Stake(address indexed user, uint256 amount, address indexed to);
     event Unstake(address indexed user, uint256 amount, address indexed to);
     event Claim(address indexed user, uint256 amount);
+
+    event AddPeriod(uint64 startBlock, uint64 endBlock, uint128 tokenPerBlock);
+    event UpdatePool(uint256 lastRewardBlock, uint256 supply, uint256 accTokenPerShare);
 
     constructor(IERC20 _stakeToken, IERC20 _rewardToken) {
         stakeToken = _stakeToken;
