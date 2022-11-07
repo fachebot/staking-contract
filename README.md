@@ -22,6 +22,7 @@ REPORT_GAS=true npx hardhat test
 
 ### Deploy
 Preparation:
+
 - Set `NODE_URL` in `.env`
 - Set `STAKE_TOKEN` in `.env`
 - Set `REWARD_TOKEN` in `.env`
