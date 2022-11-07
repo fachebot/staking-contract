@@ -10,6 +10,7 @@ import type { StakingSharedPoolL2 } from "../typechain-types/contracts/StakingSh
 describe("StakingSharedPoolL2", function () {
     let startBlock: number;
     let stakeToken: ERC20Token;
+    let stakeToken2: ERC20Token;
     let rewardToken: ERC20Token;
     let owner: SignerWithAddress;
     let signers: SignerWithAddress[] = [];
@@ -320,5 +321,116 @@ describe("StakingSharedPoolL2", function () {
             expect(await stakingContract.pendingReward(0, signers[1].address)).to.equal(b2.add(tokenPerBlock.div(3)));
             expect(await stakingContract.pendingReward(0, signers[2].address)).to.equal(b3.add(tokenPerBlock.div(3)));
         })
+    })
+
+    describe("Redeploy", function () {
+        it("Redeploy all contracts", async function () {
+            startBlock = await ethers.provider.getBlockNumber();
+
+            const ERC20 = await ethers.getContractFactory("ERC20Token");
+            stakeToken = await ERC20.deploy("Stake Token", "STAKE", "10000000000000000000000"); // blocknumber 1
+            stakeToken2 = await ERC20.deploy("Stake Token2", "STAKE2", "10000000000000000000000"); // blocknumber 2
+            rewardToken = await ERC20.deploy("Reward Token", "REWARD", "10000000000000000000000"); // blocknumber 3
+
+            const StakingContract = await ethers.getContractFactory("StakingSharedPoolL2");
+            stakingContract = await StakingContract.deploy(rewardToken.address); // blocknumber 4
+    
+            await stakingContract.add(100, stakeToken.address); // blocknumber 5
+            await stakingContract.add(100, stakeToken2.address); // blocknumber 6
+        });
+    })
+
+    describe("Multiple pools", function () {
+        it("Should set the right period", async function () {
+            await rewardToken.approve(stakingContract.address, tokenPerBlock.mul(100)); // blocknumber 7
+            await stakingContract.addPeriod(startBlock + 12, startBlock + 112, tokenPerBlock); // blocknumber 8
+
+            const balance = await rewardToken.balanceOf(stakingContract.address);
+            expect(balance).to.equals(tokenPerBlock.mul(100));
+        });
+
+        it("Should set the right stake amount", async function () {
+            await stakeToken.approve(stakingContract.address, "1000"); // blocknumber 9
+            await stakeToken2.approve(stakingContract.address, "1000"); // blocknumber 10
+            await stakingContract.stake(0, "1000", owner.address); // blocknumber 11
+            const tx = await stakingContract.stake(1, "1000", owner.address); // blocknumber 12
+            expect(tx.blockNumber as number).to.equal(startBlock + 12);
+        });
+
+        it("Should receive the right reward", async function () {
+            const times = 3;
+            for (let i = 0; i < times; i++) {
+                await ethers.provider.send("evm_mine", []);
+
+                const reward = await stakingContract.pendingReward(0, owner.address);
+                expect(reward).to.equal(tokenPerBlock.div(2).mul(i + 1));
+
+                const reward2 = await stakingContract.pendingReward(1, owner.address);
+                expect(reward2).to.equal(tokenPerBlock.div(2).mul(i + 1));
+            }
+
+            let lastStaker1Reward: BigNumber;
+            stakeToken.transfer(signers[1].address, "1000");
+            stakeToken.transfer(signers[2].address, "1000");
+            await stakeToken.connect(signers[1]).approve(stakingContract.address, "1000");
+            const tx = await stakingContract.connect(signers[1]).stake(0, "1000", signers[1].address);
+            {
+                const reward = await stakingContract.pendingReward(0, owner.address);
+                expect(reward).to.equal(tokenPerBlock.div(2).mul(tx.blockNumber as number - startBlock - 12));
+
+                const reward2 = await stakingContract.pendingReward(1, owner.address);
+                expect(reward2).to.equal(tokenPerBlock.div(2).mul(tx.blockNumber as number - startBlock - 12));
+
+                lastStaker1Reward = reward;
+            }
+
+            await stakeToken.connect(signers[2]).approve(stakingContract.address, "1000");
+            {
+                const staker1reward = await stakingContract.pendingReward(0, owner.address);
+                const staker2reward = await stakingContract.pendingReward(0, signers[1].address);
+                expect(staker1reward).to.equal(lastStaker1Reward.add(tokenPerBlock.div(2).div(2)));
+                expect(staker2reward).to.equal(tokenPerBlock.div(2).div(2));
+
+                const staker1reward2 = await stakingContract.pendingReward(1, owner.address);
+                const staker2reward2 = await stakingContract.pendingReward(1, signers[1].address);
+                expect(staker1reward2).to.equal(lastStaker1Reward.add(tokenPerBlock.div(2)));
+                expect(staker2reward2).to.equal(BigNumber.from(0));
+            }
+
+            await stakingContract.connect(signers[2]).stake(0, "1000", signers[2].address);
+            {
+                const staker1reward = await stakingContract.pendingReward(0, owner.address);
+                const staker2reward = await stakingContract.pendingReward(0, signers[1].address);
+                const staker3reward = await stakingContract.pendingReward(0, signers[2].address);
+                expect(staker1reward).to.equal(lastStaker1Reward.add(tokenPerBlock.div(2).div(2).mul(2)));
+                expect(staker2reward).to.equal(tokenPerBlock.div(2).div(2).mul(2));
+                expect(staker3reward).to.equal(BigNumber.from(0));
+
+                const staker1reward2 = await stakingContract.pendingReward(1, owner.address);
+                const staker2reward2 = await stakingContract.pendingReward(1, signers[1].address);
+                const staker3reward2 = await stakingContract.pendingReward(1, signers[2].address);
+                expect(staker1reward2).to.equal(lastStaker1Reward.add(tokenPerBlock.div(2).mul(2)));
+                expect(staker2reward2).to.equal(BigNumber.from(0));
+                expect(staker3reward2).to.equal(BigNumber.from(0));
+            }
+
+            await ethers.provider.send("evm_mine", []);
+            {
+                const value = tokenPerBlock.div(2).div(3);
+                const staker1reward = await stakingContract.pendingReward(0, owner.address);
+                const staker2reward = await stakingContract.pendingReward(0, signers[1].address);
+                const staker3reward = await stakingContract.pendingReward(0, signers[2].address);
+                expect(staker1reward).to.equal(lastStaker1Reward.add(tokenPerBlock.div(2).div(2).mul(2)).add(value));
+                expect(staker2reward).to.equal(tokenPerBlock.div(2).div(2).mul(2).add(value));
+                expect(staker3reward).to.equal(value);
+
+                const staker1reward2 = await stakingContract.pendingReward(1, owner.address);
+                const staker2reward2 = await stakingContract.pendingReward(1, signers[1].address);
+                const staker3reward2 = await stakingContract.pendingReward(1, signers[2].address);
+                expect(staker1reward2).to.equal(lastStaker1Reward.add(tokenPerBlock.div(2).mul(3)));
+                expect(staker2reward2).to.equal(BigNumber.from(0));
+                expect(staker3reward2).to.equal(BigNumber.from(0));
+            }
+        });
     })
 });

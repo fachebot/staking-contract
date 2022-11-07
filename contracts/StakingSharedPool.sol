@@ -2,11 +2,12 @@
 pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-contract StakingSharedPool is Ownable {
+contract StakingSharedPool is Ownable, Pausable {
     using SafeCast for int256;
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
@@ -122,7 +123,7 @@ contract StakingSharedPool is Ownable {
     /// @notice Deposit stake tokens to contract for reward allocation.
     /// @param amount LP token amount to deposit.
     /// @param to The receiver of `amount` deposit benefit.
-    function stake(uint256 amount, address to) external {
+    function stake(uint256 amount, address to) external whenNotPaused {
         updatePool();
 
         UserInfo storage user = userInfo[to];
@@ -138,7 +139,7 @@ contract StakingSharedPool is Ownable {
     /// @notice Withdraw stake token from contract.
     /// @param amount LP token amount to withdraw.
     /// @param to Receiver of the LP tokens.
-    function unstake(uint256 amount, address to) external {
+    function unstake(uint256 amount, address to) external whenNotPaused {
         updatePool();
 
         UserInfo storage user = userInfo[msg.sender];
@@ -153,7 +154,7 @@ contract StakingSharedPool is Ownable {
 
     /// @notice Claim proceeds for transaction sender to `to`.
     /// @param to Receiver of SUSHI rewards.
-    function claim(address to) external {
+    function claim(address to) external whenNotPaused {
         updatePool();
 
         UserInfo storage user = userInfo[msg.sender];
@@ -173,7 +174,10 @@ contract StakingSharedPool is Ownable {
     /// @notice Withdraw stake token from contract and claim proceeds for transaction sender to `to`.
     /// @param amount LP token amount to withdraw.
     /// @param to Receiver of the LP tokens and SUSHI rewards.
-    function unstakeAndClaim(uint256 amount, address to) external {
+    function unstakeAndClaim(uint256 amount, address to)
+        external
+        whenNotPaused
+    {
         updatePool();
 
         UserInfo storage user = userInfo[msg.sender];
@@ -191,5 +195,20 @@ contract StakingSharedPool is Ownable {
 
         emit Unstake(msg.sender, amount, to);
         emit Claim(msg.sender, pendingToken);
+    }
+
+    /// @notice Destroy contract and withdraw all funds to owner.
+    function kill() external onlyOwner {
+        uint256 balance = stakeToken.balanceOf(address(this));
+        if (balance > 0) {
+            stakeToken.safeTransfer(owner(), balance);
+        }
+
+        balance = rewardToken.balanceOf(address(this));
+        if (balance > 0) {
+            rewardToken.safeTransfer(owner(), balance);
+        }
+
+        selfdestruct(payable(owner()));
     }
 }

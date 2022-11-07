@@ -39,17 +39,9 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
     event Unstake(address indexed user, uint256 amount, address indexed to);
     event Claim(address indexed user, uint256 amount);
 
-    event AddPool(
-        uint256 indexed pid,
-        uint256 allocPoint,
-        IERC20 indexed stakeToken
-    );
+    event AddPool(uint256 indexed pid, uint256 allocPoint, IERC20 indexed stakeToken);
     event SetPool(uint256 indexed pid, uint256 allocPoint);
-    event UpdatePool(
-        uint256 lastRewardBlock,
-        uint256 supply,
-        uint256 accTokenPerShare
-    );
+    event UpdatePool(uint256 lastRewardBlock, uint256 supply, uint256 accTokenPerShare);
     event AddPeriod(uint64 startBlock, uint64 endBlock, uint128 tokenPerBlock);
 
     constructor(IERC20 _rewardToken) {
@@ -116,8 +108,8 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
             "StakingSharedPoolL2: previous period did not end"
         );
 
-        uint256 len = poolLength();
-        for (uint256 pid = 0; pid < len; pid++) {
+        uint256 size = poolLength();
+        for (uint256 pid = 0; pid < size; pid++) {
             updatePool(pid);
             poolInfo[pid].lastRewardBlock = _startBlock;
         }
@@ -276,5 +268,23 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
 
         emit Unstake(msg.sender, amount, to);
         emit Claim(msg.sender, pendingToken);
+    }
+
+    /// @notice Destroy contract and withdraw all funds to owner.
+    function kill() external onlyOwner {
+        uint256 size = poolLength();
+        for (uint256 pid = 0; pid < size; pid++) {
+            uint256 v = stakeToken[pid].balanceOf(address(this));
+            if (v > 0) {
+                stakeToken[pid].safeTransfer(owner(), v);
+            }
+        }
+
+        uint256 balance = rewardToken.balanceOf(address(this));
+        if (balance > 0) {
+            rewardToken.safeTransfer(owner(), balance);
+        }
+
+        selfdestruct(payable(owner()));
     }
 }
