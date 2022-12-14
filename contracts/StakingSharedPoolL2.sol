@@ -21,6 +21,7 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         uint128 accTokenPerShare;
         uint64 lastRewardBlock;
         uint64 allocPoint;
+        uint256 totalStaked;
     }
 
     uint64 public startBlock;
@@ -53,6 +54,16 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         pools = poolInfo.length;
     }
 
+    /// @notice Triggers stopped state.
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice  Returns to normal state.
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
     /// @notice Add a new stake token to the pool. Can only be called by the owner.
     /// DO NOT add the same stake token more than once. Rewards will be messed up if you do.
     /// @param _allocPoint AP of the new pool.
@@ -66,7 +77,8 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
             PoolInfo({
                 allocPoint: _allocPoint.toUint64(),
                 lastRewardBlock: lastRewardBlock.toUint64(),
-                accTokenPerShare: 0
+                accTokenPerShare: 0,
+                totalStaked: 0
             })
         );
 
@@ -138,10 +150,14 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
     {
         uint256 accTokenPerShare = poolInfo[_pid].accTokenPerShare;
         UserInfo storage user = userInfo[_pid][_user];
-        uint256 supply = stakeToken[_pid].balanceOf(address(this));
-        if (block.number > poolInfo[_pid].lastRewardBlock && supply != 0) {
+        if (
+            block.number > poolInfo[_pid].lastRewardBlock &&
+            poolInfo[_pid].totalStaked != 0
+        ) {
             uint256 reward = blocksReward(_pid);
-            accTokenPerShare += (reward * ACC_TOKEN_PRECISION) / supply;
+            accTokenPerShare +=
+                (reward * ACC_TOKEN_PRECISION) /
+                poolInfo[_pid].totalStaked;
         }
 
         return
@@ -167,16 +183,16 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
     function updatePool(uint256 pid) public returns (PoolInfo memory pool) {
         pool = poolInfo[pid];
         if (block.number > pool.lastRewardBlock) {
-            uint256 supply = stakeToken[pid].balanceOf(address(this));
-            if (supply > 0) {
+            if (pool.totalStaked > 0) {
                 uint256 reward = blocksReward(pid);
                 pool.accTokenPerShare += ((reward * ACC_TOKEN_PRECISION) /
-                    supply).toUint128();
+                    pool.totalStaked).toUint128();
             }
 
             pool.lastRewardBlock = block.number.toUint64();
             poolInfo[pid] = pool;
-            emit UpdatePool(block.number, supply, pool.accTokenPerShare);
+
+            emit UpdatePool(block.number, pool.totalStaked, pool.accTokenPerShare);
         }
     }
 
@@ -195,6 +211,8 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         user.amount += amount;
         user.rewardDebt += ((amount * pool.accTokenPerShare) /
             ACC_TOKEN_PRECISION).toInt256();
+
+        poolInfo[pid].totalStaked += amount;
 
         stakeToken[pid].safeTransferFrom(msg.sender, address(this), amount);
 
@@ -216,6 +234,8 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         user.rewardDebt -= ((amount * pool.accTokenPerShare) /
             ACC_TOKEN_PRECISION).toInt256();
         user.amount -= amount;
+
+        poolInfo[pid].totalStaked -= amount;
 
         stakeToken[pid].safeTransfer(to, amount);
 
@@ -262,6 +282,8 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
             accumulatedToken -
             ((amount * pool.accTokenPerShare) / ACC_TOKEN_PRECISION).toInt256();
         user.amount -= amount;
+
+        poolInfo[pid].totalStaked -= amount;
 
         rewardToken.safeTransfer(to, pendingToken);
         stakeToken[pid].safeTransfer(to, amount);
