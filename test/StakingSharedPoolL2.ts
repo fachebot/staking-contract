@@ -433,4 +433,10 @@ describe("StakingSharedPoolL2", function () {
             }
         });
     })
+
+    describe("Kill", function () {
+        it("Should self destruct", async function () {
+            await stakingContract.kill();
+        });
+    })
 });
