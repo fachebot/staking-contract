@@ -4,13 +4,13 @@ pragma solidity ^0.8.9;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 contract StakingSharedPoolL2 is Ownable, Pausable {
     using SafeCast for int256;
     using SafeCast for uint256;
-    using SafeERC20 for IERC20;
+    using SafeERC20 for IERC20Metadata;
 
     struct UserInfo {
         uint256 amount;
@@ -30,22 +30,21 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
     uint256 public totalAllocPoint;
 
     PoolInfo[] public poolInfo;
-    IERC20[] public stakeToken;
+    IERC20Metadata[] public stakeToken;
     mapping(uint256 => mapping(address => UserInfo)) public userInfo;
 
-    IERC20 public immutable rewardToken;
-    uint256 private constant ACC_TOKEN_PRECISION = 1e12;
+    IERC20Metadata public immutable rewardToken;
 
     event Stake(address indexed user, uint256 amount, address indexed to);
     event Unstake(address indexed user, uint256 amount, address indexed to);
     event Claim(address indexed user, uint256 amount);
 
-    event AddPool(uint256 indexed pid, uint256 allocPoint, IERC20 indexed stakeToken);
+    event AddPool(uint256 indexed pid, uint256 allocPoint, IERC20Metadata indexed stakeToken);
     event SetPool(uint256 indexed pid, uint256 allocPoint);
     event UpdatePool(uint256 lastRewardBlock, uint256 supply, uint256 accTokenPerShare);
     event AddPeriod(uint64 startBlock, uint64 endBlock, uint128 tokenPerBlock);
 
-    constructor(IERC20 _rewardToken) {
+    constructor(IERC20Metadata _rewardToken) {
         rewardToken = _rewardToken;
     }
 
@@ -64,11 +63,28 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         _unpause();
     }
 
+    function accTokenPrecision(IERC20Metadata token)
+        private
+        view
+        returns (uint256)
+    {
+        int256 dec = 12;
+        int256 a = int256(int8(token.decimals()));
+        int256 b = int256(int8(rewardToken.decimals()));
+        if (a > b) {
+            dec += a - b;
+        }
+        return 10**dec.toUint256();
+    }
+
     /// @notice Add a new stake token to the pool. Can only be called by the owner.
     /// DO NOT add the same stake token more than once. Rewards will be messed up if you do.
     /// @param _allocPoint AP of the new pool.
     /// @param _stakeToken Address of the stake ERC-20 token.
-    function add(uint256 _allocPoint, IERC20 _stakeToken) public onlyOwner {
+    function add(uint256 _allocPoint, IERC20Metadata _stakeToken)
+        public
+        onlyOwner
+    {
         uint256 lastRewardBlock = block.number;
         totalAllocPoint = totalAllocPoint + _allocPoint;
 
@@ -148,21 +164,23 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         view
         returns (uint256)
     {
-        uint256 accTokenPerShare = poolInfo[_pid].accTokenPerShare;
         UserInfo storage user = userInfo[_pid][_user];
+        uint256 accTokenPerShare = poolInfo[_pid].accTokenPerShare;
+        uint256 precision = accTokenPrecision(stakeToken[_pid]);
+
         if (
             block.number > poolInfo[_pid].lastRewardBlock &&
             poolInfo[_pid].totalStaked != 0
         ) {
             uint256 reward = blocksReward(_pid);
             accTokenPerShare +=
-                (reward * ACC_TOKEN_PRECISION) /
+                (reward * precision) /
                 poolInfo[_pid].totalStaked;
         }
 
         return
-            (((user.amount * accTokenPerShare) / ACC_TOKEN_PRECISION)
-                .toInt256() - user.rewardDebt).toUint256();
+            (((user.amount * accTokenPerShare) / precision).toInt256() -
+                user.rewardDebt).toUint256();
     }
 
     /// @notice Calculates and returns the `amount` of reward token.
@@ -185,14 +203,19 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         if (block.number > pool.lastRewardBlock) {
             if (pool.totalStaked > 0) {
                 uint256 reward = blocksReward(pid);
-                pool.accTokenPerShare += ((reward * ACC_TOKEN_PRECISION) /
-                    pool.totalStaked).toUint128();
+                pool.accTokenPerShare += ((reward *
+                    accTokenPrecision(stakeToken[pid])) / pool.totalStaked)
+                    .toUint128();
             }
 
             pool.lastRewardBlock = block.number.toUint64();
             poolInfo[pid] = pool;
 
-            emit UpdatePool(block.number, pool.totalStaked, pool.accTokenPerShare);
+            emit UpdatePool(
+                block.number,
+                pool.totalStaked,
+                pool.accTokenPerShare
+            );
         }
     }
 
@@ -210,7 +233,7 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         UserInfo storage user = userInfo[pid][to];
         user.amount += amount;
         user.rewardDebt += ((amount * pool.accTokenPerShare) /
-            ACC_TOKEN_PRECISION).toInt256();
+            accTokenPrecision(stakeToken[pid])).toInt256();
 
         poolInfo[pid].totalStaked += amount;
 
@@ -232,7 +255,7 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
 
         UserInfo storage user = userInfo[pid][msg.sender];
         user.rewardDebt -= ((amount * pool.accTokenPerShare) /
-            ACC_TOKEN_PRECISION).toInt256();
+            accTokenPrecision(stakeToken[pid])).toInt256();
         user.amount -= amount;
 
         poolInfo[pid].totalStaked -= amount;
@@ -250,7 +273,7 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
 
         UserInfo storage user = userInfo[pid][msg.sender];
         int256 accumulatedToken = ((user.amount * pool.accTokenPerShare) /
-            ACC_TOKEN_PRECISION).toInt256();
+            accTokenPrecision(stakeToken[pid])).toInt256();
         uint256 pendingToken = (accumulatedToken - user.rewardDebt).toUint256();
 
         user.rewardDebt = accumulatedToken;
@@ -272,15 +295,16 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         address to
     ) external whenNotPaused {
         PoolInfo memory pool = updatePool(pid);
+        uint256 precision = accTokenPrecision(stakeToken[pid]);
 
         UserInfo storage user = userInfo[pid][msg.sender];
         int256 accumulatedToken = ((user.amount * pool.accTokenPerShare) /
-            ACC_TOKEN_PRECISION).toInt256();
+            precision).toInt256();
         uint256 pendingToken = (accumulatedToken - user.rewardDebt).toUint256();
 
         user.rewardDebt =
             accumulatedToken -
-            ((amount * pool.accTokenPerShare) / ACC_TOKEN_PRECISION).toInt256();
+            ((amount * pool.accTokenPerShare) / precision).toInt256();
         user.amount -= amount;
 
         poolInfo[pid].totalStaked -= amount;

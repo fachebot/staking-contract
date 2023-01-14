@@ -23,8 +23,8 @@ describe("StakingSharedPoolL2", function () {
         startBlock = await ethers.provider.getBlockNumber();
 
         const ERC20 = await ethers.getContractFactory("ERC20Token");
-        stakeToken = await ERC20.deploy("Stake Token", "STAKE", "10000000000000000000000"); // blocknumber 1
-        rewardToken = await ERC20.deploy("Reward Token", "REWARD", "10000000000000000000000"); // blocknumber 2
+        stakeToken = await ERC20.deploy("Stake Token", "STAKE", "10000000000000000000000", 18); // blocknumber 1
+        rewardToken = await ERC20.deploy("Reward Token", "REWARD", "10000000000000000000000", 18); // blocknumber 2
 
         const StakingContract = await ethers.getContractFactory("StakingSharedPoolL2");
         stakingContract = await StakingContract.deploy(rewardToken.address); // blocknumber 3
@@ -328,9 +328,9 @@ describe("StakingSharedPoolL2", function () {
             startBlock = await ethers.provider.getBlockNumber();
 
             const ERC20 = await ethers.getContractFactory("ERC20Token");
-            stakeToken = await ERC20.deploy("Stake Token", "STAKE", "10000000000000000000000"); // blocknumber 1
-            stakeToken2 = await ERC20.deploy("Stake Token2", "STAKE2", "10000000000000000000000"); // blocknumber 2
-            rewardToken = await ERC20.deploy("Reward Token", "REWARD", "10000000000000000000000"); // blocknumber 3
+            stakeToken = await ERC20.deploy("Stake Token", "STAKE", "10000000000000000000000", 18); // blocknumber 1
+            stakeToken2 = await ERC20.deploy("Stake Token2", "STAKE2", "10000000000000000000000", 18); // blocknumber 2
+            rewardToken = await ERC20.deploy("Reward Token", "REWARD", "10000000000000000000000", 18); // blocknumber 3
 
             const StakingContract = await ethers.getContractFactory("StakingSharedPoolL2");
             stakingContract = await StakingContract.deploy(rewardToken.address); // blocknumber 4

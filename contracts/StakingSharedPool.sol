@@ -4,13 +4,13 @@ pragma solidity ^0.8.9;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 contract StakingSharedPool is Ownable, Pausable {
     using SafeCast for int256;
     using SafeCast for uint256;
-    using SafeERC20 for IERC20;
+    using SafeERC20 for IERC20Metadata;
 
     struct UserInfo {
         uint256 amount;
@@ -24,21 +24,32 @@ contract StakingSharedPool is Ownable, Pausable {
     uint256 lastRewardBlock;
     mapping(address => UserInfo) userInfo;
 
-    IERC20 public immutable stakeToken;
-    IERC20 public immutable rewardToken;
-
-    uint256 private constant ACC_TOKEN_PRECISION = 1e12;
+    IERC20Metadata public immutable stakeToken;
+    IERC20Metadata public immutable rewardToken;
+    uint256 private immutable accTokenPrecision;
 
     event Stake(address indexed user, uint256 amount, address indexed to);
     event Unstake(address indexed user, uint256 amount, address indexed to);
     event Claim(address indexed user, uint256 amount);
 
     event AddPeriod(uint64 startBlock, uint64 endBlock, uint128 tokenPerBlock);
-    event UpdatePool(uint256 lastRewardBlock, uint256 supply, uint256 accTokenPerShare);
+    event UpdatePool(
+        uint256 lastRewardBlock,
+        uint256 supply,
+        uint256 accTokenPerShare
+    );
 
-    constructor(IERC20 _stakeToken, IERC20 _rewardToken) {
+    constructor(IERC20Metadata _stakeToken, IERC20Metadata _rewardToken) {
         stakeToken = _stakeToken;
         rewardToken = _rewardToken;
+
+        int256 dec = 12;
+        int256 a = int256(int8(stakeToken.decimals()));
+        int256 b = int256(int8(rewardToken.decimals()));
+        if (a > b) {
+            dec += a - b;
+        }
+        accTokenPrecision = 10**dec.toUint256();
     }
 
     /// @notice Add a new reward period.
@@ -88,11 +99,11 @@ contract StakingSharedPool is Ownable, Pausable {
         uint256 supply = stakeToken.balanceOf(address(this));
         if (block.number > lastRewardBlock && supply != 0) {
             uint256 reward = blocksReward();
-            value += (reward * ACC_TOKEN_PRECISION) / supply;
+            value += (reward * accTokenPrecision) / supply;
         }
 
         return
-            (((user.amount * value) / ACC_TOKEN_PRECISION).toInt256() -
+            (((user.amount * value) / accTokenPrecision).toInt256() -
                 user.rewardDebt).toUint256();
     }
 
@@ -112,7 +123,7 @@ contract StakingSharedPool is Ownable, Pausable {
             uint256 supply = stakeToken.balanceOf(address(this));
             if (supply > 0) {
                 uint256 reward = blocksReward();
-                accTokenPerShare += (reward * ACC_TOKEN_PRECISION) / supply;
+                accTokenPerShare += (reward * accTokenPrecision) / supply;
             }
 
             lastRewardBlock = block.number;
@@ -128,7 +139,7 @@ contract StakingSharedPool is Ownable, Pausable {
 
         UserInfo storage user = userInfo[to];
         user.amount += amount;
-        user.rewardDebt += ((amount * accTokenPerShare) / ACC_TOKEN_PRECISION)
+        user.rewardDebt += ((amount * accTokenPerShare) / accTokenPrecision)
             .toInt256();
 
         stakeToken.safeTransferFrom(msg.sender, address(this), amount);
@@ -143,7 +154,7 @@ contract StakingSharedPool is Ownable, Pausable {
         updatePool();
 
         UserInfo storage user = userInfo[msg.sender];
-        user.rewardDebt -= ((amount * accTokenPerShare) / ACC_TOKEN_PRECISION)
+        user.rewardDebt -= ((amount * accTokenPerShare) / accTokenPrecision)
             .toInt256();
         user.amount -= amount;
 
@@ -159,7 +170,7 @@ contract StakingSharedPool is Ownable, Pausable {
 
         UserInfo storage user = userInfo[msg.sender];
         int256 accumulatedToken = ((user.amount * accTokenPerShare) /
-            ACC_TOKEN_PRECISION).toInt256();
+            accTokenPrecision).toInt256();
         uint256 pendingToken = (accumulatedToken - user.rewardDebt).toUint256();
 
         user.rewardDebt = accumulatedToken;
@@ -182,12 +193,12 @@ contract StakingSharedPool is Ownable, Pausable {
 
         UserInfo storage user = userInfo[msg.sender];
         int256 accumulatedToken = ((user.amount * accTokenPerShare) /
-            ACC_TOKEN_PRECISION).toInt256();
+            accTokenPrecision).toInt256();
         uint256 pendingToken = (accumulatedToken - user.rewardDebt).toUint256();
 
         user.rewardDebt =
             accumulatedToken -
-            ((amount * accTokenPerShare) / ACC_TOKEN_PRECISION).toInt256();
+            ((amount * accTokenPerShare) / accTokenPrecision).toInt256();
         user.amount -= amount;
 
         rewardToken.safeTransfer(to, pendingToken);
