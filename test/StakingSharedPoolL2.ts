@@ -334,7 +334,7 @@ describe("StakingSharedPoolL2", function () {
 
             const StakingContract = await ethers.getContractFactory("StakingSharedPoolL2");
             stakingContract = await StakingContract.deploy(rewardToken.address); // blocknumber 4
-    
+
             await stakingContract.add(100, stakeToken.address); // blocknumber 5
             await stakingContract.add(100, stakeToken2.address); // blocknumber 6
         });
@@ -437,6 +437,62 @@ describe("StakingSharedPoolL2", function () {
     describe("Kill", function () {
         it("Should self destruct", async function () {
             await stakingContract.kill();
+        });
+    })
+
+    describe("Token Decimals", function () {
+        it("Case 1", async function () {
+            startBlock = await ethers.provider.getBlockNumber();
+
+            const ERC20 = await ethers.getContractFactory("ERC20Token");
+            stakeToken = await ERC20.deploy("SIE", "SIE", "10000000000000000000000", 18); // blocknumber 1
+            rewardToken = await ERC20.deploy("SIE", "SIE", "10000000000000000000000", 5); // blocknumber 2
+
+            const StakingContract = await ethers.getContractFactory("StakingSharedPoolL2");
+            stakingContract = await StakingContract.deploy(rewardToken.address); // blocknumber 3
+
+            await stakingContract.add(100, stakeToken.address); // blocknumber 4
+
+            await rewardToken.approve(stakingContract.address, "10000000000000000000000"); // blocknumber 5
+            await stakingContract.addPeriod(startBlock + 9, startBlock + 9 + 10512000, 142694); // blocknumber 6
+
+            await stakeToken.approve(stakingContract.address, "10000000000000000000000"); // blocknumber 7
+            await stakingContract.stake(0, "1121243931052750837592", owner.address); // blocknumber 8
+
+            for (let i = 1; i < 1449; i++) {
+                await ethers.provider.send("evm_mine", []);
+            }
+
+            await stakingContract.stake(0, "4607409730885464151", owner.address);
+            const reward = await stakingContract.pendingReward(0, owner.address);
+            expect(reward).to.equals(BigNumber.from("206620912"));
+        });
+
+        it("Case 2", async function () {
+            startBlock = await ethers.provider.getBlockNumber();
+
+            const ERC20 = await ethers.getContractFactory("ERC20Token");
+            stakeToken = await ERC20.deploy("SIE", "SIE", "10000000000000000000000000000000000", 18); // blocknumber 1
+            rewardToken = await ERC20.deploy("SIE", "SIE", "10000000000000000000000", 5); // blocknumber 2
+
+            const StakingContract = await ethers.getContractFactory("StakingSharedPoolL2");
+            stakingContract = await StakingContract.deploy(rewardToken.address); // blocknumber 3
+
+            await stakingContract.add(100, stakeToken.address); // blocknumber 4
+
+            await rewardToken.approve(stakingContract.address, "10000000000000000000000"); // blocknumber 5
+            await stakingContract.addPeriod(startBlock + 8, startBlock + 8 + 10512000, 142694); // blocknumber 6
+
+            await stakeToken.approve(stakingContract.address, "10000000000000000000000000000000000"); // blocknumber 7
+            await stakingContract.stake(0, "1", owner.address); // blocknumber 8
+
+            for (let i = 0; i < 999; i++) {
+                await stakingContract.updatePool(0);
+            }
+
+            await stakingContract.stake(0, "1", owner.address);
+            const reward = await stakingContract.pendingReward(0, owner.address);
+            expect(reward).to.equals(BigNumber.from(142694*1000));
         });
     })
 });

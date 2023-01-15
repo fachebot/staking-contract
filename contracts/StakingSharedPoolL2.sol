@@ -18,7 +18,7 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
     }
 
     struct PoolInfo {
-        uint128 accTokenPerShare;
+        uint256 accTokenPerShare;
         uint64 lastRewardBlock;
         uint64 allocPoint;
         uint256 totalStaked;
@@ -34,6 +34,7 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
     mapping(uint256 => mapping(address => UserInfo)) public userInfo;
 
     IERC20Metadata public immutable rewardToken;
+    uint256 private constant ACC_TOKEN_PRECISION = 1e30;
 
     event Stake(address indexed user, uint256 amount, address indexed to);
     event Unstake(address indexed user, uint256 amount, address indexed to);
@@ -61,20 +62,6 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
     /// @notice  Returns to normal state.
     function unpause() external onlyOwner {
         _unpause();
-    }
-
-    function accTokenPrecision(IERC20Metadata token)
-        private
-        view
-        returns (uint256)
-    {
-        int256 dec = 12;
-        int256 a = int256(int8(token.decimals()));
-        int256 b = int256(int8(rewardToken.decimals()));
-        if (a > b) {
-            dec += a - b;
-        }
-        return 10**dec.toUint256();
     }
 
     /// @notice Add a new stake token to the pool. Can only be called by the owner.
@@ -166,7 +153,6 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
     {
         UserInfo storage user = userInfo[_pid][_user];
         uint256 accTokenPerShare = poolInfo[_pid].accTokenPerShare;
-        uint256 precision = accTokenPrecision(stakeToken[_pid]);
 
         if (
             block.number > poolInfo[_pid].lastRewardBlock &&
@@ -174,13 +160,13 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         ) {
             uint256 reward = blocksReward(_pid);
             accTokenPerShare +=
-                (reward * precision) /
+                (reward * ACC_TOKEN_PRECISION) /
                 poolInfo[_pid].totalStaked;
         }
 
         return
-            (((user.amount * accTokenPerShare) / precision).toInt256() -
-                user.rewardDebt).toUint256();
+            (((user.amount * accTokenPerShare) / ACC_TOKEN_PRECISION)
+                .toInt256() - user.rewardDebt).toUint256();
     }
 
     /// @notice Calculates and returns the `amount` of reward token.
@@ -203,9 +189,8 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         if (block.number > pool.lastRewardBlock) {
             if (pool.totalStaked > 0) {
                 uint256 reward = blocksReward(pid);
-                pool.accTokenPerShare += ((reward *
-                    accTokenPrecision(stakeToken[pid])) / pool.totalStaked)
-                    .toUint128();
+                pool.accTokenPerShare += ((reward * ACC_TOKEN_PRECISION) /
+                    pool.totalStaked);
             }
 
             pool.lastRewardBlock = block.number.toUint64();
@@ -233,7 +218,7 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         UserInfo storage user = userInfo[pid][to];
         user.amount += amount;
         user.rewardDebt += ((amount * pool.accTokenPerShare) /
-            accTokenPrecision(stakeToken[pid])).toInt256();
+            ACC_TOKEN_PRECISION).toInt256();
 
         poolInfo[pid].totalStaked += amount;
 
@@ -255,7 +240,7 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
 
         UserInfo storage user = userInfo[pid][msg.sender];
         user.rewardDebt -= ((amount * pool.accTokenPerShare) /
-            accTokenPrecision(stakeToken[pid])).toInt256();
+            ACC_TOKEN_PRECISION).toInt256();
         user.amount -= amount;
 
         poolInfo[pid].totalStaked -= amount;
@@ -273,7 +258,7 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
 
         UserInfo storage user = userInfo[pid][msg.sender];
         int256 accumulatedToken = ((user.amount * pool.accTokenPerShare) /
-            accTokenPrecision(stakeToken[pid])).toInt256();
+            ACC_TOKEN_PRECISION).toInt256();
         uint256 pendingToken = (accumulatedToken - user.rewardDebt).toUint256();
 
         user.rewardDebt = accumulatedToken;
@@ -295,16 +280,14 @@ contract StakingSharedPoolL2 is Ownable, Pausable {
         address to
     ) external whenNotPaused {
         PoolInfo memory pool = updatePool(pid);
-        uint256 precision = accTokenPrecision(stakeToken[pid]);
-
         UserInfo storage user = userInfo[pid][msg.sender];
         int256 accumulatedToken = ((user.amount * pool.accTokenPerShare) /
-            precision).toInt256();
+            ACC_TOKEN_PRECISION).toInt256();
         uint256 pendingToken = (accumulatedToken - user.rewardDebt).toUint256();
 
         user.rewardDebt =
             accumulatedToken -
-            ((amount * pool.accTokenPerShare) / precision).toInt256();
+            ((amount * pool.accTokenPerShare) / ACC_TOKEN_PRECISION).toInt256();
         user.amount -= amount;
 
         poolInfo[pid].totalStaked -= amount;

@@ -42,14 +42,7 @@ contract StakingSharedPool is Ownable, Pausable {
     constructor(IERC20Metadata _stakeToken, IERC20Metadata _rewardToken) {
         stakeToken = _stakeToken;
         rewardToken = _rewardToken;
-
-        int256 dec = 12;
-        int256 a = int256(int8(stakeToken.decimals()));
-        int256 b = int256(int8(rewardToken.decimals()));
-        if (a > b) {
-            dec += a - b;
-        }
-        accTokenPrecision = 10**dec.toUint256();
+        accTokenPrecision = uint256(10) ** (uint256(stakeToken.decimals()) + 12);
     }
 
     /// @notice Add a new reward period.
